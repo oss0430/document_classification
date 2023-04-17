@@ -30,6 +30,10 @@ def evaluate_confusion_matrix(
     # Calculate weighted F1 score
     weighted_f1_score = np.sum(f1_score * np.sum(confusion_matrix, axis=1) / np.sum(confusion_matrix))
 
+    precision = precision.tolist()
+    recall = recall.tolist()
+    f1_score = f1_score.tolist()
+    
     return {
         "precision" : precision,
         "recall" : recall,

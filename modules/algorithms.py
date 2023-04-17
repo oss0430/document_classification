@@ -9,6 +9,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.ensemble import RandomForestClassifier
 from gensim.models import Word2Vec
 from gensim.models import KeyedVectors
 
@@ -118,6 +119,7 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         self.n_gram_map = defaultdict(int)
         self.categories = categories
     
+    
     def get_n_gram_list(
         self,
         document : str
@@ -169,17 +171,6 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         dataset,
         method
     ) -> dict:
-        
-        ## for testing :
-        """
-        count = 0
-        last_num = 20
-        for key, value in self.n_gram_table.items():
-            print(key, value)
-            count += 1
-            if count == last_num :
-                break
-        """
 
         test_data = dataset.get_dataset_for_scikitlearn(method)
         X_test = test_data["X"]
@@ -192,7 +183,7 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         return {"acc" : accuracy_score(y_test, y_pred),
                 "confusion_matrix" : confusion_matrix(y_test, y_pred)
                 }   
-
+    
     
     def classify_document(
         self,
@@ -214,69 +205,89 @@ class Word2VecForDC(DocumnetClassificationAlgorithms):
     
     def __init__(
         self,
-        train_df,
         categories,
         *args,
         **kwargs
     ):
-        super().__init__(self, train_df, categories, *args, **kwargs)
-        documents = self._get_documents(train_df)
-        self.model = Word2Vec(documents, min_count=1, size=100, window=5, sg=1)
-        self.classifier = LogisticRegression(random_state=42)
+        super().__init__(self, categories, *args, **kwargs)
+        self.embedding_size = 100
+        self.model = Word2Vec(min_count=1, vector_size = self.embedding_size, window=5, sg=1)
+        self.classifier = RandomForestClassifier()
     
     
-    def _get_document_embeddings(
+    def _get_document_embedding(
         self,
-        document : list
+        document : str
     ):
-        X = []
-        for word in document:
-            if word in self.model.wv.vocab:
-                vector.append(self.model.wv[word])
-        if len(vector) > 0:
-            vector = sum(vector) / len(vector)
-            X.append(vector)
-    
+        tokenized_document = nltk.tokenize.word_tokenize(document.lower())
         
-    def _get_documents(
+        vector = []
+        vocabulary = list(self.model.wv.key_to_index.keys())
+        for word in tokenized_document:
+            if word in vocabulary:
+                vector.append(self.model.wv[word])
+
+        if len(vector) > 0:
+            documment_embedding = sum(vector) / len(vector)
+        else :
+            documment_embedding = np.zeros(self.embedding_size)
+        return documment_embedding
+    
+    
+    def transform_list_of_documents_to_tokenized_version(
         self,
-        document_df
-    ) -> dict :
-        return {"X" : [],
-                "Y" : []
-                }
+        documents : list
+    ) -> list :
+        
+        tokenized_documents = []
+        
+        for document in documents:
+            tokenized_document = nltk.tokenize.word_tokenize(document.lower())
+            tokenized_documents.append(tokenized_document)    
+        
+        return tokenized_documents 
     
     
     def train(
         self,
-        document_df : pd.DataFrame
+        dataset,
+        method
     ):
         
-        train_data = self._get_documents(document_df)
+        train_data = dataset.get_dataset_for_scikitlearn(method)
         documents = train_data["X"]
+        tokenized_documents = self.transform_list_of_documents_to_tokenized_version(documents)
         y_train = train_data["Y"]
+        
+        ## train word embeddings
+        self.model = Word2Vec(tokenized_documents, min_count=1, vector_size = self.embedding_size, window=5, sg=1)
         
         X_train = []
         for document in documents :
-            X_train.append(self._get_document_embeddings(document))
+            X_train.append(self._get_document_embedding(document))
 
         self.classifier.fit(X_train, y_train)
         
         
     def evaluate(
         self,
-        document_df : pd.DataFrame
+        dataset,
+        method
     ):
-        test_data = self._get_documents(document_df)
+        test_data = dataset.get_dataset_for_scikitlearn(method)
         documents = test_data["X"]
+        tokenized_documents = self.transform_list_of_documents_to_tokenized_version(documents)
         y_test = test_data["Y"]
         
         X_test = []
         for document in documents :
-            X_test.append(self._get_document_embeddings(document))
-        
+            X_test.append(self._get_document_embedding(document))
+
         y_pred = self.classifier.predict(X_test)
-        return classification_report(y_test, y_pred)
+        
+        return {"acc" : accuracy_score(y_test, y_pred),
+                "confusion_matrix" : confusion_matrix(y_test, y_pred)
+                }  
 
         
    

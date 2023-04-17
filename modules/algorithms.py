@@ -3,7 +3,7 @@ import pandas as pd
 import re
 import tqdm
 import numpy as np
-#from nltk.util import ngrmas
+import nltk
 from collections import defaultdict
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -65,11 +65,12 @@ class KnnForDC(DocumnetClassificationAlgorithms):
         self.classifier = KNeighborsClassifier(n_neighbors = len(categories))
         self.tfidf = TfidfVectorizer()
         
+        
     def train(
         self,
         dataset,
         method
-    ) -> KNeighborsClassifier :
+    ) -> None :
         
         train_data = dataset.get_dataset_for_scikitlearn(method)
 
@@ -97,110 +98,115 @@ class KnnForDC(DocumnetClassificationAlgorithms):
                 }      
 
 
-class NaieveBayesForDC():
+class NaieveBayesForDC(DocumnetClassificationAlgorithms):
     
     
     def __init__(
         self,
+        categories,
         n_gram : int = 1,
         use_laplace_smoothing : bool = False,
-        tokenizer = None,
+        *args,
+        **kwargs
     ):
+        super().__init__(self, categories, *args, **kwargs)
         self.n_gram = n_gram
         self.use_laplace_smoothing = use_laplace_smoothing
-        self.tokenizer = tokenizer
-        self.n_gram_table = None
-        self.n_gram_map = dict()
+        
+        default_value = np.zeros(len(categories))
+        self.n_gram_table = defaultdict(lambda: default_value)
+        self.n_gram_map = defaultdict(int)
+        self.categories = categories
     
-    
-    def _update_n_gram_map_and_get_ngrams(
+    def get_n_gram_list(
         self,
-        document,
-        n_gram_map : dict
-    ) -> list :
-        ##TODO:
-        ## implement this method
+        document : str
+    ) -> list:
         
-        ## make n_gran list
-        n_grams = []
+        words = nltk.word_tokenize(document.lower())
+        n_grams = nltk.ngrams(words, self.n_gram)
         
-        ## update n_grma
-        
-        ## get n_gram_as_token_idx
-        n_grams_tokens = []
-        
-        return n_grams_tokens
-        
+        return n_grams
     
-    def create_n_gram_table(
+    
+    def get_label_one_hot_encoding(
         self,
-        dataloader
-    ) -> dict :
+        label : str
+    ) -> np.ndarray :
+        
+        num_labels = len(self.categories)
+        onehot_matrix = np.eye(num_labels)
+        
+        index = np.where(self.categories == label)[0]
 
-        number_of_class = dataloader.dataset.get_class_num()
-        n_gram_table = defaultdict(np.zeros(number_of_class))
-        
-        for input, label in tqdm(dataloader, total = dataloader.len):
-            one_hot_encode = np.zeros(number_of_class)
-            one_hot_encode[label] = 1
-            
-            n_grams_tokens = self._update_n_gram_map_and_get_ngrams(input, self.n_gram_map)
-            for token in n_grams_tokens :
-                n_gram_table[token] = n_gram_table[token] + one_hot_encode
-        
-        if self.use_laplace_smoothing:
-            n_gram_table + 1
-        
-        self.n_gram_table = n_gram_table
-        
-        return n_gram_table
+        onehot_label = onehot_matrix[index]
+        onehot_label = onehot_label.flatten()
+
+        return onehot_label
     
+    
+    def train(
+        self,
+        dataset,
+        method
+    ) -> None:
+        train_data = dataset.get_dataset_for_scikitlearn(method)
+        X_train = train_data["X"]
+        y_train = train_data["Y"]
+        
+        for X, y in zip(X_train, y_train):
+            ## split string to n_gram
+            n_gram_list = self.get_n_gram_list(X)
+            one_hot_encoded_label = self.get_label_one_hot_encoding(y)
+            
+            ## Add to n_gram_table
+            for n_gram in n_gram_list :
+                self.n_gram_table[n_gram] += one_hot_encoded_label
+                
+   
+    def evaluate(
+        self,
+        dataset,
+        method
+    ) -> dict:
+        
+        ## for testing :
+        """
+        count = 0
+        last_num = 20
+        for key, value in self.n_gram_table.items():
+            print(key, value)
+            count += 1
+            if count == last_num :
+                break
+        """
+
+        test_data = dataset.get_dataset_for_scikitlearn(method)
+        X_test = test_data["X"]
+        y_test = test_data["Y"]
+        y_pred = []
+        
+        for X in X_test:
+            y_pred.append(self.classify_document(X))
+        
+        return {"acc" : accuracy_score(y_test, y_pred),
+                "confusion_matrix" : confusion_matrix(y_test, y_pred)
+                }   
+
     
     def classify_document(
         self,
-        document,
-        num_of_labels
+        document
     ) -> int :
-        
-        if not self.n_gram_table:
-            raise('Need to make n_gram_table before inferencing, use ".create_n_gram_table"')
-        
-        n_grams = list(ngrmas(document, self.n_gram))
-        tokens = []
-        for token in n_grams:
-            try:
-                ## appeard in map
-                tokens.append(self.n_gram_map[token])
-            except:
-                ## not appeared in map
-                None
-        
-        frequency = np.zeros(num_of_labels)
-        for token_index in tokens:
-            frequency = frequency + self.n_gram_table[token_index]
-        
-        label_rank = np.argsort(frequency)
-        
-        return label_rank[0]
-    
-    
-    def inference(
-        self,
-        dataloader
-    ) :
-        number_of_class = dataloader.dataset.get_class_num()
-        confusion_matrix = np.zeros((number_of_class, number_of_class))
-        
-        for input, label in tqdm(dataloader, total = dataloader.len):
+ 
+        n_grams = self.get_n_gram_list(document)
+        logit = np.zeros(len(self.categories))
+        for n_gram in n_grams :
+            logit += self.n_gram_table[n_gram]
             
-            prediction = self.classify_document(input,
-                                                num_of_labels = number_of_class)
-            
-            confusion_matrix[label, prediction] + 1
+        highest_index = logit.argmax()
         
-        evaluation = None#evaluate_confusion_matrix(confusion_matrix)
-        
-        return evaluation
+        return self.categories[highest_index]
     
 
 class Word2VecForDC(DocumnetClassificationAlgorithms):

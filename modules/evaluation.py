@@ -1,6 +1,6 @@
 import modules
 import numpy as np
-
+import os
 
 def evaluate_confusion_matrix(
     confusion_matrix : np.array
@@ -22,10 +22,14 @@ def evaluate_confusion_matrix(
     precision = np.zeros(num_classes)
     recall = np.zeros(num_classes)
     f1_score = np.zeros(num_classes)
+    
+    def logical_div(a, b):
+        return b and a/b or 0 
+    
     for i in range(num_classes):
-        precision[i] = tp[i] / (tp[i] + fp[i])
-        recall[i] = tp[i] / (tp[i] + fn[i])
-        f1_score[i] = 2 * (precision[i] * recall[i]) / (precision[i] + recall[i])
+        precision[i] = logical_div(tp[i],tp[i] + fp[i])
+        recall[i] = logical_div(tp[i],tp[i] + fn[i])
+        f1_score[i] = 2 * logical_div((precision[i] * recall[i]), (precision[i] + recall[i]))
 
     # Calculate weighted F1 score
     weighted_f1_score = np.sum(f1_score * np.sum(confusion_matrix, axis=1) / np.sum(confusion_matrix))
@@ -40,3 +44,10 @@ def evaluate_confusion_matrix(
         "f1_score" : f1_score,
         "weighted_f1_score" : weighted_f1_score
     }
+    
+    
+def qualatative(
+    dataset, algorithm
+):
+    result = []
+    return result

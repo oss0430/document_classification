@@ -4,6 +4,7 @@ import re
 import tqdm
 import numpy as np
 import nltk
+import copy
 from collections import defaultdict
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -81,6 +82,16 @@ class KnnForDC(DocumnetClassificationAlgorithms):
         self.classifier.fit(X_train, y_train)
         
     
+    def predict(
+        self,
+        document :str
+    ) :
+        tfidf = self.tfidf.transform([document])
+        prediction = self.classifier.predict(tfidf)
+        
+        return prediction
+    
+    
     def evaluate(
         self,
         dataset,
@@ -98,6 +109,19 @@ class KnnForDC(DocumnetClassificationAlgorithms):
                 "confusion_matrix" : confusion_matrix(y_test, y_pred)
                 }      
 
+    
+    def inference(
+        self,
+        documents : list
+    ) -> list :
+        
+        results = []
+        
+        for document in documents:
+            results.append(self.predict(document))
+            
+        return results
+    
 
 class NaieveBayesForDC(DocumnetClassificationAlgorithms):
     
@@ -116,7 +140,6 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         
         default_value = np.zeros(len(categories))
         self.n_gram_table = defaultdict(lambda: default_value)
-        self.n_gram_map = defaultdict(int)
         self.categories = categories
     
     
@@ -147,6 +170,44 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         return onehot_label
     
     
+    def _get_prior(
+        self,
+        frequency_table : dict
+    ) -> np.ndarray :
+        
+        total_frequency = np.zeros(len(self.categories))
+        for word, frequency_array in frequency_table.items():
+            total_frequency += frequency_array
+        
+        prior_probabilities = total_frequency / np.sum(total_frequency)
+        
+        return prior_probabilities
+         
+
+    def _get_likelihood(
+        self,
+        frequency_table : dict
+    ) -> dict :
+
+        ##            word frequency on that class  + 1
+        ##  ------------------------------------------------------------
+        ##   Total Vocaburary Count + Vocaburarys that apperas in the class
+
+        total_frequency = np.zeros(len(self.categories))
+        for word, frequency_array in frequency_table.items():
+            total_frequency += frequency_array
+        
+        unique_vocaburary_counts = np.zeros(len(self.categories))
+        for word, frequency_array in frequency_table.items():
+            unique_vocaburary_counts += (frequency_array >= 1).astype(int)
+
+        likelihoods = {}
+        for word, frequency_array in frequency_table.items():
+            likelihoods[word] = (frequency_array + 1) / (unique_vocaburary_counts + total_frequency)
+
+        return likelihoods
+            
+    
     def train(
         self,
         dataset,
@@ -156,6 +217,8 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         X_train = train_data["X"]
         y_train = train_data["Y"]
         
+        n_gram_frequency_table = defaultdict(lambda: np.zeros(len(self.categories)))
+        ## Build Frequency Table
         for X, y in zip(X_train, y_train):
             ## split string to n_gram
             n_gram_list = self.get_n_gram_list(X)
@@ -163,9 +226,16 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
             
             ## Add to n_gram_table
             for n_gram in n_gram_list :
-                self.n_gram_table[n_gram] += one_hot_encoded_label
-                
-   
+                n_gram_frequency_table[n_gram] += one_hot_encoded_label
+
+        self.n_gram_frequency_table = n_gram_frequency_table
+        self.likelihoods = self._get_likelihood(copy.deepcopy(n_gram_frequency_table))
+        self.prior = self._get_prior(copy.deepcopy(n_gram_frequency_table))
+        #print("likelihoods and prior")
+        #print(self.likelihoods)
+        #print(self.prior)
+        
+
     def evaluate(
         self,
         dataset,
@@ -193,13 +263,32 @@ class NaieveBayesForDC(DocumnetClassificationAlgorithms):
         n_grams = self.get_n_gram_list(document)
         logit = np.zeros(len(self.categories))
         for n_gram in n_grams :
-            logit += self.n_gram_table[n_gram]
-            
+            try :
+                logit += self.likelihoods[n_gram]
+            except :
+                ## Newly Appeared Dropping it
+                None
+        logit = self.prior * logit
+        #print(logit)
         highest_index = logit.argmax()
         
         return self.categories[highest_index]
     
 
+    def inference(
+        self,
+        documents : list
+    ) -> list :
+        
+        results = []
+        
+        for document in documents:
+            results.append(self.classify_document(document))
+            
+        return results
+    
+    
+    
 class Word2VecForDC(DocumnetClassificationAlgorithms):
     
     
@@ -268,6 +357,16 @@ class Word2VecForDC(DocumnetClassificationAlgorithms):
 
         self.classifier.fit(X_train, y_train)
         
+    
+    def predict(
+        self,
+        document : str
+    ) :
+        document_embedding = self._get_document_embedding(document)
+        prediction = self.classifier.predict([document_embedding])
+        
+        return prediction
+        
         
     def evaluate(
         self,
@@ -289,5 +388,16 @@ class Word2VecForDC(DocumnetClassificationAlgorithms):
                 "confusion_matrix" : confusion_matrix(y_test, y_pred)
                 }  
 
+    
+    def inference(
+        self,
+        documents : list
+    ) -> list :
         
+        results = []
+        
+        for document in documents:
+            results.append(self.predict(document))
+            
+        return results
    
